@@ -1,6 +1,7 @@
 add_triton_library(TritonIntelGPUTransforms
   AccelerateMatmul.cpp
   DistributeToWarps.cpp
+  MaterializeBlockPointer.cpp
   PrefetchBlock.cpp
   Utility.cpp
 

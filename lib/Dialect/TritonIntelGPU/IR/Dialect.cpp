@@ -179,17 +179,17 @@ unsigned DpasEncodingAttr::getTotalElemsPerThreadForOperands(
   int warpsPerCTAM = getWarpsPerCTA()[0];
   int warpsPerCTAN = getWarpsPerCTA()[1];
   auto rep = getDPASRepetitions(shapePerCTA, opIdx);
-  auto threadsPerWar = getSubGroupSize();
+  auto threadsPerWarp = getSubGroupSize();
   if (opIdx == 0) {
     auto instrShapeA = getShapeA();
     auto totalElem = product<unsigned>(instrShapeA);
     // dpas operands scalar are evenly sharded to each work item.
-    return (totalElem / threadsPerWar) * rep[0] * rep[1];
+    return (totalElem / threadsPerWarp) * rep[0] * rep[1];
   } else { // if (opIdx == 1)
     auto instrShapeB = getShapeB();
     auto totalElem = product<unsigned>(instrShapeB);
     // dpas operands scalar are evenly sharded to each work item.
-    return (totalElem / threadsPerWar) * rep[0] * rep[1];
+    return (totalElem / threadsPerWarp) * rep[0] * rep[1];
   }
 }
 

@@ -30,6 +30,10 @@ std::unique_ptr<Pass> createTritonIntelGPUDistributeToWarpsPass();
 
 std::unique_ptr<Pass> createPrefetchBlockPass();
 
+std::unique_ptr<Pass> createTritonIntelGPUMaterializeBlockPointerPass(
+    triton::gpu::intel::DeviceArch arch =
+        triton::gpu::intel::DeviceArch::UNKNOWN);
+
 } // namespace intel
 } // namespace gpu
 } // namespace triton

@@ -253,10 +253,14 @@ def matmul(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor):
         x_vals=[[3072, 4096, 3072]],
         line_arg='provider',
         # argument name whose value corresponds to a different line in the plot
-        # possible values for `line_arg``
-        line_vals=['triton', 'xetla'],
-        # label name for the lines
-        line_names=['Triton', 'XeTLA'],
+        # # possible values for `line_arg``
+        # line_vals=['triton', 'xetla'],
+        # # label name for the lines
+        # line_names=['Triton', 'XeTLA'],
+        line_vals=[
+            'triton',
+        ],
+        line_names=['Triton'],
         # line styles
         styles=[('green', '-'), ('green', '--'), ('blue', '-'), ('blue', '--')],
         ylabel=['GB/s', 'TFlops'],  # label name for the y-axis

@@ -1,6 +1,7 @@
 #include "PatternTritonGPUOpToLLVM.h"
 #include "TargetInfo.h"
 #include "Utility.h"
+#include <iostream>
 
 #include "intel/include/Analysis/Utility.h"
 #include "intel/include/Dialect/TritonIntelGPU/IR/Dialect.h"
@@ -39,6 +40,7 @@ public:
   LogicalResult
   matchAndRewrite(triton::gpu::ConvertLayoutOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+    std::cout << "ConvertLayoutOpConversion" << std::endl;
     RankedTensorType srcTy = op.getSrc().getType();
     RankedTensorType dstTy = op.getType();
     Attribute srcLayout = srcTy.getEncoding();
@@ -64,6 +66,7 @@ private:
                     RankedTensorType type,
                     ArrayRef<unsigned> multiDimCTAInRepId,
                     ArrayRef<unsigned> shapePerCTATile) const {
+    std::cout << "getMultiDimOffset" << std::endl;
     auto shape = type.getShape();
     unsigned rank = shape.size();
     if (auto blockedLayout = dyn_cast<BlockedEncodingAttr>(layout)) {
@@ -110,7 +113,7 @@ private:
       return multiDimOffset;
     }
     if (auto dpasLayout = dyn_cast<DpasEncodingAttr>(layout)) {
-      assert(rank == 2);
+      assert(rank == 2 || rank == 3);
       auto multiDimBase = ::intel::emitBaseIndexForLayout(
           loc, rewriter, targetInfo, layout, type, false);
       SmallVector<SmallVector<unsigned>> offsets;
@@ -118,9 +121,13 @@ private:
           dpasLayout, offsets, multiDimCTAInRepId[0] * shapePerCTATile[0],
           multiDimCTAInRepId[1] * shapePerCTATile[1]);
 
-      SmallVector<Value> multiDimOffset = {
-          add(multiDimBase[0], i32_val(offsets[elemId][0])),
-          add(multiDimBase[1], i32_val(offsets[elemId][1]))};
+      SmallVector<Value> multiDimOffset(rank);
+      if (rank == 3)
+        multiDimOffset[0] = multiDimBase[0];
+      multiDimOffset[rank - 2] =
+          add(multiDimBase[rank - 2], i32_val(offsets[elemId][rank - 2]));
+      multiDimOffset[rank - 1] =
+          add(multiDimBase[rank - 1], i32_val(offsets[elemId][rank - 1]));
 
       return multiDimOffset;
     }
@@ -136,6 +143,7 @@ private:
                       ArrayRef<unsigned> origRepShape,
                       ArrayRef<unsigned> outOrd, SmallVector<Value> &vals,
                       Value smemBase) const {
+    std::cout << "processReplica" << std::endl;
     auto accumNumCTAsEachRep = product<unsigned>(numCTAsEachRep);
     auto layout = type.getEncoding();
     auto rank = type.getRank();
@@ -221,6 +229,7 @@ private:
   lowerDistributedToDistributed(triton::gpu::ConvertLayoutOp op,
                                 OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const {
+    std::cout << "lowerDistributedToDistributed" << std::endl;
     auto loc = op.getLoc();
     auto typeConverter = getTypeConverter();
     RankedTensorType srcTy = op.getSrc().getType();
@@ -313,12 +322,14 @@ private:
     return success();
   }
 
-  using ValueTable = std::map<std::pair<unsigned, unsigned>, Value>;
+  // using ValueTable = std::map<std::pair<unsigned, unsigned>, Value>;
+  using ValueTable = std::map<std::array<unsigned, 3>, Value>;
 
   ValueTable getValuesFromDpasLayoutStruct(Location loc,
                                            ConversionPatternRewriter &rewriter,
                                            Value vals,
                                            RankedTensorType srcType) const {
+    std::cout << "getValuesFromDpasLayoutStruct" << std::endl;
     SmallVector<Value> elems = unpackLLElements(loc, vals, rewriter);
     auto dpasLayout = dyn_cast<DpasEncodingAttr>(srcType.getEncoding());
 
@@ -332,20 +343,26 @@ private:
     SmallVector<int64_t> repetitions =
         dpasLayout.getDPASRepetitions(srcType.getShape(), 2 /*operand C*/);
     ArrayRef<unsigned> repCluster = dpasLayout.getRepCluster();
+    size_t rank = repCluster.size();
+    size_t outerDim = rank - 2;
+    size_t innerDim = rank - 1;
 
     int offset = 0;
     ValueTable result;
-    for (int i = 0; i < repetitions[0]; ++i) {
-      for (int j = 0; j < repetitions[1]; ++j) {
-        for (int repOuter = 0; repOuter < repCluster[0]; ++repOuter) {
-          for (int repInner = 0; repInner < repCluster[1]; ++repInner) {
-            Value matVal = rewriter.create<LLVM::UndefOp>(loc, dotOpTy);
-            for (int k = 0; k < numElemsPerOperand; ++k) {
-              matVal =
-                  insert_element(dotOpTy, matVal, elems[offset++], i32_val(k));
+    for (unsigned b = 0; b < repetitions[0]; ++b) {
+      for (int i = 0; i < repetitions[1]; ++i) {
+        for (int j = 0; j < repetitions[2]; ++j) {
+          for (int repOuter = 0; repOuter < repCluster[outerDim]; ++repOuter) {
+            for (int repInner = 0; repInner < repCluster[innerDim];
+                 ++repInner) {
+              Value matVal = rewriter.create<LLVM::UndefOp>(loc, dotOpTy);
+              for (int k = 0; k < numElemsPerOperand; ++k) {
+                matVal = insert_element(dotOpTy, matVal, elems[offset++],
+                                        i32_val(k));
+              }
+              result[{b, i * repCluster[outerDim] + repOuter,
+                      j * repCluster[innerDim] + repInner}] = matVal;
             }
-            result[{i * repCluster[0] + repOuter,
-                    j * repCluster[1] + repInner}] = matVal;
           }
         }
       }
@@ -357,41 +374,46 @@ private:
   Value composeValuesToDotOperandLayoutStruct(
       Location loc, ConversionPatternRewriter &rewriter, const ValueTable &vals,
       RankedTensorType dstType) const {
+    std::cout << "composeValuesToDotOperandLayoutStruct" << std::endl;
     auto dotLayout = dyn_cast<DotOperandEncodingAttr>(dstType.getEncoding());
     auto dpasLayout = dyn_cast<DpasEncodingAttr>(dotLayout.getParent());
     unsigned opIdx = dotLayout.getOpIdx();
     SmallVector<int64_t> repetitions =
         dpasLayout.getDPASRepetitions(dstType.getShape(), opIdx);
     ArrayRef<unsigned> repCluster = dpasLayout.getRepCluster();
+    size_t rank = repCluster.size();
+    unsigned repBatch = repetitions[0];
     unsigned repOuter = 0u;
     unsigned repInner = 0u;
     unsigned repClusterOuter = 0u;
     if (opIdx == 0) {
       // operand A
-      repOuter = repetitions[0];
-      repInner = repetitions[1];
-      repClusterOuter = repCluster[0];
+      repOuter = repetitions[1];
+      repInner = repetitions[2];
+      repClusterOuter = repCluster[rank - 2];
     } else {
       // operand B
-      repOuter = repetitions[1];
-      repInner = repetitions[0];
-      repClusterOuter = repCluster[1];
+      repOuter = repetitions[2];
+      repInner = repetitions[1];
+      repClusterOuter = repCluster[rank - 1];
     }
 
     // TODO: Operands B requires extra steps to combine [8, 16] to [16, 16].
     SmallVector<Value> elems;
-    for (int m = 0; m < repOuter; ++m) {
-      for (int k = 0; k < repInner; ++k) {
-        for (int repOuterIdx = 0; repOuterIdx < repClusterOuter;
-             ++repOuterIdx) {
-          unsigned offsetM = m * repClusterOuter + repOuterIdx;
-          unsigned offsetN = k;
-          Value matVal = vals.at({offsetM, offsetN});
-          VectorType vecType = cast<mlir::VectorType>(matVal.getType());
-          Type valTy = vecType.getElementType();
-          for (int i = 0; i < vecType.getNumElements(); ++i) {
-            Value val = extract_element(valTy, matVal, i32_val(i));
-            elems.push_back(val);
+    for (unsigned b = 0; b < repBatch; ++b) {
+      for (int m = 0; m < repOuter; ++m) {
+        for (int k = 0; k < repInner; ++k) {
+          for (int repOuterIdx = 0; repOuterIdx < repClusterOuter;
+               ++repOuterIdx) {
+            unsigned offsetM = m * repClusterOuter + repOuterIdx;
+            unsigned offsetN = k;
+            Value matVal = vals.at({b, offsetM, offsetN});
+            VectorType vecType = cast<mlir::VectorType>(matVal.getType());
+            Type valTy = vecType.getElementType();
+            for (int i = 0; i < vecType.getNumElements(); ++i) {
+              Value val = extract_element(valTy, matVal, i32_val(i));
+              elems.push_back(val);
+            }
           }
         }
       }
@@ -409,6 +431,7 @@ private:
   LogicalResult
   lowerDpasToDotOperand(triton::gpu::ConvertLayoutOp op, OpAdaptor adaptor,
                         ConversionPatternRewriter &rewriter) const {
+    std::cout << "lowerDpasToDotOperand" << std::endl;
     Location loc = op.getLoc();
     RankedTensorType srcTy = op.getSrc().getType();
     RankedTensorType dstTy = op.getType();
@@ -441,6 +464,7 @@ struct ConvertLayoutOpUsingLinearLayoutsConversion
   LogicalResult
   matchAndRewrite(ConvertLayoutOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+    std::cout << "ConvertLayoutOpUsingLinearLayoutsConversion" << std::endl;
     MLIRContext *ctx = op.getContext();
 
     const auto &shape = op.getType().getShape();
@@ -489,6 +513,7 @@ struct ConvertLayoutOpUsingLinearLayoutsConversion
   transferWithinThread(ConvertLayoutOp op, const LinearLayout &srcLayout,
                        const LinearLayout &dstLayout, OpAdaptor adaptor,
                        ConversionPatternRewriter &rewriter) const {
+    std::cout << "transferWithinThread" << std::endl;
     MLIRContext *ctx = op.getContext();
     auto loc = op.getLoc();
     StringAttr kRegister = str_attr("register");

@@ -154,6 +154,7 @@ private:
 
     auto smemObj = getSharedMemoryObjectFromStruct(loc, adaptor.getSrc(),
                                                    llvmElemTy, rewriter);
+    std::cout << "  ~ smemObj rank: " << smemObj.strides.size() << std::endl;
     Value res;
     if (!isOuter) {
       res = SharedToDotOperandDPAS::intel::convertLayout(
@@ -162,6 +163,7 @@ private:
     } else {
       assert(false && "unsupported DPAS layout found");
     }
+    std::cout << "    ~ lowerSharedToDotOperandDPAS end." << std::endl;
     return res;
   }
 
@@ -176,6 +178,18 @@ private:
     auto sharedLayout =
         cast<SharedEncodingAttr>(op.getSrc().getType().getEncoding());
 
+    std::cout << "    ~ sharedLayout: ";
+    for (auto i : sharedLayout.getOrder()) {
+      std::cout << i << " ";
+    }
+    std::cout << std::endl;
+    std::cout << "    ~ localload shape: ";
+    for (auto i : op.getType().getShape()) {
+      std::cout << i << " ";
+    }
+    std::cout << std::endl;
+
+    unsigned rank = sharedLayout.getOrder().size();
     int K;
     if (dotLayout.getOpIdx() == 0) // $a
       K = op.getType().getShape()[sharedLayout.getOrder()[0]];
@@ -199,6 +213,7 @@ private:
     }
 
     rewriter.replaceOp(op, res);
+    std::cout << "  ~ lowerSharedToDotOperand end." << std::endl;
     return success();
   }
   LogicalResult

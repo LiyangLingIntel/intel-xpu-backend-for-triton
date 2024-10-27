@@ -140,6 +140,11 @@ public:
     assert(repA[2] == repB[1] && "Unexpected rep for A and B operands");
     unsigned repBatch = repA[0];
     unsigned repM = repA[1], repN = repB[2], repK = repA[2];
+    std::cout << " - ConvertDot: \n"
+              << "    - repA: " << repA[0] << " " << repA[1] << " " << repA[2]
+              << "\n"
+              << "    - repB: " << repB[0] << " " << repB[1] << " " << repB[2]
+              << "\n";
 
     auto dpasType = DPASAnalysis::getDPASType(op);
     auto dpasEncoding = cast<DpasEncodingAttr>(DTensorTy.getEncoding());
@@ -202,7 +207,7 @@ public:
 
     Value res = composeValuesToDotOperandLayoutStruct(fc, repBatch, repM, repN,
                                                       resElemTy);
-
+    std::cout << " - convertDot - end\n";
     rewriter.replaceOp(op, res);
 
     return success();
@@ -272,6 +277,8 @@ private:
                                                  Type dotOperandType,
                                                  uint32_t opIdx) const {
     SmallVector<Value> elems = unpackLLElements(loc, val, rewriter);
+    std::cout << "    - getValuesFromDotOperandLayoutStruct - opIdx " << opIdx
+              << "  elems.size(): " << elems.size() << "\n";
     ArrayRef<unsigned> repCluster = dpasLayout.getRepCluster();
     size_t rank = repCluster.size();
     unsigned repClusterOuter = 0u;
@@ -299,9 +306,22 @@ private:
 
     size_t totalElems = elems.size();
     size_t numElemsPerOperand =
-        totalElems / ((outer * inner) * (repClusterOuter * repClusterInner));
+        totalElems /
+        ((batch * outer * inner) * (repClusterOuter * repClusterInner));
     VectorType dotOpTy = vec_ty(elemTy, numElemsPerOperand);
 
+    std::cout << "    - remain of toalElems: "
+              << totalElems %
+                     ((outer * inner) * (repClusterOuter * repClusterInner))
+              << "\n";
+    std::cout << "    - batch, outer, inner, repClusterOuter, repClusterInner, "
+                 "numElemsPerOperand: "
+              << batch << " " << outer << " " << inner << " " << repClusterOuter
+              << " " << repClusterInner << " " << numElemsPerOperand << "\n";
+    std::cout << "    - for loop size: "
+              << batch * outer * inner * repClusterOuter * repClusterInner *
+                     numElemsPerOperand
+              << "\n";
     int offset = 0;
     ValueTable vals;
     for (unsigned b = 0; b < batch; ++b) {
@@ -322,6 +342,8 @@ private:
         }
       }
     }
+    std::cout << "    - getValuesFromDotOperandLayoutStruct - opIdx " << opIdx
+              << "end\n";
 
     return vals;
   }

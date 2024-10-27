@@ -294,6 +294,15 @@ emitOffsetForDotOpLayout(const DotOperandEncodingAttr &dotLayout,
         }
       }
 
+  std::cout << "~ emitOffsetForDotOpLayout - num elems per CTA: "
+            << offsets.size() << "\n";
+  for (auto offset : offsets) {
+    std::cout << "    ";
+    for (auto elem : offset)
+      std::cout << elem << " ";
+    std::cout << "\n";
+  }
+
   return offsets;
 }
 
@@ -309,6 +318,15 @@ emitOffsetForDpasLayout(const DpasEncodingAttr &dpasLayout,
     for (unsigned j = 0; j < shape[rank - 1]; j += shapePerCTA[rank - 1]) {
       emitOffsetForDpasLayoutPerCTA(dpasLayout, offsets, i, j);
     }
+  }
+
+  std::cout << "~ emitOffsetForDpasLayoutPerCTA - num elems per CTA: "
+            << offsets.size() << "\n";
+  for (auto offset : offsets) {
+    std::cout << "    ";
+    for (auto elem : offset)
+      std::cout << elem << " ";
+    std::cout << "\n";
   }
 
   return offsets;
@@ -568,7 +586,6 @@ emitBaseIndexForLayout(Location loc, RewriterBase &rewriter,
 
 inline SmallVector<SmallVector<unsigned>>
 emitOffsetForLayout(Attribute layout, RankedTensorType type) {
-  std::cout << "~! emitOffsetForLayout\n";
   if (auto dpasLayout = dyn_cast<DpasEncodingAttr>(layout))
     return emitOffsetForDpasLayout(dpasLayout, type);
   if (auto dotLayout = dyn_cast<DotOperandEncodingAttr>(layout))
@@ -642,6 +659,7 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs(
   // then (x + y) XOR z = 0byyyyxxxx XOR 0b00000zzzz = (x XOR z) + y
   // This means that we can use some immediate offsets for shared memory
   // operations.
+  std::cout << "~ getSwizzledSharedPtrs\n";
   auto dstPtrTy = shrMemObj.base.getType();
   auto dstOffset = dot(rewriter, loc, offsetVals, shrMemObj.strides);
   Value dstPtrBase = gep(dstPtrTy, resElemTy, shrMemObj.base, dstOffset);
@@ -657,7 +675,11 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs(
   // Order
   auto inOrder = triton::gpu::getOrder(srcEncoding);
   auto outOrder = triton::gpu::getOrder(resSharedLayout);
+  unsigned rank = outOrder.size();
+  std::cout << "  inOrder rank: " << inOrder.size()
+            << " outOrder: " << outOrder.size() << "\n";
   assert(maxPhase == 1 ||
+         //  outVec * maxPhase <= srcShape[outOrder[rank-2]] &&
          outVec * maxPhase <= srcShape[outOrder[0]] &&
              "Swizzling would generate out of bounds memory accesses");
   // Tensor indices held by the current thread, as LLVM values
@@ -680,6 +702,8 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs(
   Value numElemsPerSwizzlingRowVal = i32_val(numElemsPerSwizzlingRow);
   unsigned leadingDimOffset;
   if (outOrder.size() >= 2) {
+    // leadingDimOffset =
+    //     numElemsPerSwizzlingRow * srcShapePerCTA[outOrder[rank - 1]];
     leadingDimOffset = numElemsPerSwizzlingRow * srcShapePerCTA[outOrder[1]];
   } else {
     leadingDimOffset = numElemsPerSwizzlingRow;
@@ -691,6 +715,9 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs(
   // cache for non-immediate offsets
   DenseMap<unsigned, Value> cacheCol, cacheRow;
   unsigned minVec = std::min(outVec, inVec);
+  // Value strideRow =
+  //     outOrder.size() >= 2 ? srcStrides[outOrder[rank - 1]] : i32_val(0);
+  // Value strideCol = srcStrides[outOrder[rank - 2]];
   Value strideRow = outOrder.size() >= 2 ? srcStrides[outOrder[1]] : i32_val(0);
   Value strideCol = srcStrides[outOrder[0]];
   LDBG("getSwizzledSharedPtrs: perPhase = "

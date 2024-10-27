@@ -180,18 +180,21 @@ DpasEncodingAttr::getElemsPerThread(ArrayRef<int64_t> shape, Type eltTy) const {
   elemsPerThread[rank - 2] = sizePerThread[rank - 2] * tilesRow;
   elemsPerThread[rank - 1] = sizePerThread[rank - 1] * tilesCol;
 
-  // if (rank == 3)
-  //   std::cout << "elemsPerThread: " << elemsPerThread[0] << ", " <<
-  //   elemsPerThread[1] << ", " << elemsPerThread[2] << std::endl;
-  // else
-  //   std::cout << "elemsPerThread: " << elemsPerThread[0] << ", " <<
-  //   elemsPerThread[1] << std::endl;
+  if (rank == 3)
+    std::cout << "  - Dpas: elemsPerThread: " << elemsPerThread[0] << ", "
+              << elemsPerThread[1] << ", " << elemsPerThread[2] << std::endl;
+  else
+    std::cout << "  - Dpas: elemsPerThread: " << elemsPerThread[0] << ", "
+              << elemsPerThread[1] << std::endl;
   return elemsPerThread;
 }
 
 unsigned DpasEncodingAttr::getTotalElemsPerThread(ArrayRef<int64_t> shape,
                                                   Type eltTy) const {
-  return product<unsigned>(getElemsPerThread(shape, eltTy));
+  auto numElems = product<unsigned>(getElemsPerThread(shape, eltTy));
+  std::cout << "  - TotalElemsPerThread: " << numElems << std::endl;
+  return numElems;
+  // return product<unsigned>(getElemsPerThread(shape, eltTy));
 }
 
 SmallVector<unsigned> DpasEncodingAttr::getCTASplitNum() const {

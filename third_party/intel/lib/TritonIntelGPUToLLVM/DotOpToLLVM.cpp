@@ -1,6 +1,7 @@
 #include "PatternTritonGPUOpToLLVM.h"
 #include "Utility.h"
 #include "intel/include/Dialect/TritonIntelGPU/IR/Dialect.h"
+#include <iostream>
 
 using namespace mlir;
 using namespace mlir::triton;
@@ -29,6 +30,7 @@ struct DotOpConversion : public ConvertTritonGPUOpToLLVMPattern<triton::DotOp> {
   LogicalResult
   matchAndRewrite(triton::DotOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+    std::cout << " ~ DotOpConversion\n";
     Location loc = op->getLoc();
     // D = A * B + C
     Value A = op.getA();
@@ -36,7 +38,8 @@ struct DotOpConversion : public ConvertTritonGPUOpToLLVMPattern<triton::DotOp> {
 
     // Here we assume the DotOp's operands always comes from shared memory.
     auto AShapePerCTA = getShapePerCTA(A.getType());
-    size_t reduceAxis = 1;
+    size_t rank = AShapePerCTA.size();
+    size_t reduceAxis = rank - 1;
     unsigned K = AShapePerCTA[reduceAxis];
     bool isOuter = K == 1;
 

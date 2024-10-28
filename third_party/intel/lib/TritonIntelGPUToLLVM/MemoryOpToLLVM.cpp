@@ -91,6 +91,7 @@ struct LocalAllocOpConversion
     }
     auto retVal = getStructFromSharedMemoryObject(loc, smemObj, rewriter);
     rewriter.replaceOp(op, retVal);
+    std::cout << "  ~ LocalAllocOpConversion end." << std::endl;
     return success();
   }
 
@@ -154,7 +155,6 @@ private:
 
     auto smemObj = getSharedMemoryObjectFromStruct(loc, adaptor.getSrc(),
                                                    llvmElemTy, rewriter);
-    std::cout << "  ~ smemObj rank: " << smemObj.strides.size() << std::endl;
     Value res;
     if (!isOuter) {
       res = SharedToDotOperandDPAS::intel::convertLayout(
@@ -200,6 +200,7 @@ private:
     Value res;
     if (auto dpasLayout =
             dyn_cast_or_null<DpasEncodingAttr>(dotLayout.getParent())) {
+      std::cout << "    ~ lowerSharedToDotOperandDPAS: " << std::endl;
       res = lowerSharedToDotOperandDPAS(op, adaptor, typeConverter, rewriter,
                                         dpasLayout, dotLayout, isOuter);
     } else if (auto blockedLayout = dyn_cast_or_null<BlockedEncodingAttr>(
@@ -273,6 +274,7 @@ public:
                              adaptor.getSrc(), smemObj, getTypeConverter(),
                              rewriter, targetInfo);
     rewriter.eraseOp(op);
+    std::cout << " ~ LocalStoreOpConversion end." << std::endl;
     return success();
   }
 

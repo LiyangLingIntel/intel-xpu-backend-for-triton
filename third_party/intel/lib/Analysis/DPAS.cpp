@@ -1,5 +1,6 @@
 #include "intel/include/Analysis/DPAS.h"
 #include "intel/include/Dialect/TritonIntelGPU/IR/Dialect.h"
+#include <iostream>
 
 namespace mlir::triton::gpu::intel {
 
@@ -35,10 +36,12 @@ DPASAnalysis::DPASAnalysis(Operation *root) {
 
 DPASAnalysis::Result
 DPASAnalysis::canUseDPAS(FunctionOpInterface funcOp) const {
+  assert(!(funcToDotMap.empty() || dotToDPASEngineMap.empty()));
   if (funcToDotMap.empty() || dotToDPASEngineMap.empty())
     return Result::False;
 
   auto it = funcToDotMap.find(funcOp);
+  assert(!(it == funcToDotMap.end()));
   if (it == funcToDotMap.end())
     return Result::False;
 
@@ -46,8 +49,10 @@ DPASAnalysis::canUseDPAS(FunctionOpInterface funcOp) const {
   // instructions.
   for (const DotOp &dotOp : it->second) {
     DPASEngineType dpasEngineType = dotToDPASEngineMap.at(dotOp);
-    if (dpasEngineType == DPASEngineType::NOT_APPLICABLE)
+    if (dpasEngineType == DPASEngineType::NOT_APPLICABLE) {
+      std::cout << "DPAS engine type not applicable\n";
       return Result::False;
+    }
   }
 
   // Verify whether the module has the correct number of threads per warp.
@@ -62,6 +67,8 @@ DPASAnalysis::canUseDPAS(FunctionOpInterface funcOp) const {
   unsigned minSGSize = mod->getAttrOfType<IntegerAttr>(
                               TritonIntelGPUDialect::getMinSGSizeAttrName())
                            .getInt();
+  std::cout << "threadsPerWarp: " << threadsPerWarp
+            << "  minSGSize: " << minSGSize << "\n";
   return (threadsPerWarp == minSGSize) ? Result::True : Result::False;
 }
 

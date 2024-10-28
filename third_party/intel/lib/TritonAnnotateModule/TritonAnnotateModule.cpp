@@ -1,6 +1,7 @@
 #include "intel/include/Analysis/DPAS.h"
 #include "intel/include/Dialect/TritonIntelGPU/IR/Dialect.h"
 #include "intel/include/TritonAnnotateModule/Passes.h"
+#include <iostream>
 
 namespace mlir::triton::gpu::intel {
 #define GEN_PASS_DEF_TRITONANNOTATEMODULE
@@ -52,12 +53,14 @@ private:
       // FIXME: DPAS lowering only implemented for 16 threads per warp, i.e.,
       // DPAS is not used for devices like ATS.
       constexpr unsigned supportedThreadsPerWarp = 16;
+      std::cout << "minSGSize: " << minSGSize << "\n";
       if (minSGSize != supportedThreadsPerWarp)
         return WalkResult::interrupt();
 
       if (dpasAnalysis.canUseDPAS(funcOp) == DPASAnalysis::Result::Maybe) {
         // Set the threads per warp attribute to allow dot operation to be
         // lowered to DPAS instructions.
+        std::cout << "DPASAnalysis result is Maybe\n";
         mod->setAttr(AttrNumThreadsPerWarp,
                      builder.getI32IntegerAttr(minSGSize));
         assert(dpasAnalysis.canUseDPAS(funcOp) == DPASAnalysis::Result::True &&

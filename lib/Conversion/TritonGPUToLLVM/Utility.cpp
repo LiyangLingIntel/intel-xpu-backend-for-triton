@@ -6,6 +6,8 @@
 #include "triton/Dialect/TritonGPU/IR/LinearLayoutConversions.h"
 #include "llvm/ADT/STLExtras.h"
 
+#include <iostream>
+
 namespace SharedToDotOperandMMAv1 {
 using CoordTy = SmallVector<Value>;
 using ValueTable = std::map<std::pair<int, int>, std::pair<Value, Value>>;
@@ -560,6 +562,8 @@ SharedMemoryObject getSharedMemoryObjectFromStruct(Location loc,
   }
 
   auto rank = (elems.size() - 1) / 2;
+  std::cout << "      SmemObj elems size: " << elems.size()
+            << ", rank: " << rank << std::endl;
   return {/*base=*/elems[0],
           /*baseElemType=*/elemTy,
           /*strides=*/{elems.begin() + 1, elems.begin() + 1 + rank},

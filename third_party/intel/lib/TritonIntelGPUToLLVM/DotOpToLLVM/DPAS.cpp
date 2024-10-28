@@ -393,6 +393,7 @@ LogicalResult convertDPAS(triton::DotOp op, triton::DotOp::Adaptor adaptor,
     module->dump();
   });
 
+  std::cout << "    ~ convertDPAS\n";
   Value A = op.getA(), B = op.getB(), C = op.getC(), D = op.getResult();
 
   auto ATensorTy = cast<RankedTensorType>(A.getType()),

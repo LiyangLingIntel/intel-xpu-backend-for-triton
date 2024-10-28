@@ -1,5 +1,6 @@
 #include "mlir/Support/LLVM.h"
 #include "triton/Conversion/TritonGPUToLLVM/Utility.h"
+#include <iostream>
 
 using ValueTable = std::map<std::pair<int, int>, Value>;
 using ::mlir::LLVM::delinearize;
@@ -35,11 +36,18 @@ getThreadIds(Value threadId, ArrayRef<unsigned int> shapePerCTATile,
 int getShapePerCTATileForMN(BlockedEncodingAttr layout, bool isM) {
   auto order = layout.getOrder();
   auto shapePerCTATile = getShapePerCTATile(layout);
+  int rank = shapePerCTATile.size();
 
-  int mShapePerCTATile =
-      order[0] == 1 ? shapePerCTATile[order[1]] : shapePerCTATile[order[0]];
-  int nShapePerCTATile =
-      order[0] == 0 ? shapePerCTATile[order[1]] : shapePerCTATile[order[0]];
+  int mShapePerCTATile = order[0] == rank - 1 ? shapePerCTATile[order[1]]
+                                              : shapePerCTATile[order[0]];
+  int nShapePerCTATile = order[0] == rank - 2 ? shapePerCTATile[order[1]]
+                                              : shapePerCTATile[order[0]];
+
+  std::cout << "    - getShapePerCTATileForMN - order[0]: " << order[0]
+            << ", rank: " << rank << "\n";
+  std::cout << "    - getShapePerCTATileForMN - mShapePerCTATile: "
+            << mShapePerCTATile << ", nShapePerCTATile: " << nShapePerCTATile
+            << "\n";
   return isM ? mShapePerCTATile : nShapePerCTATile;
 }
 
@@ -47,11 +55,17 @@ int getShapePerCTATileForMN(BlockedEncodingAttr layout, bool isM) {
 int getSizePerThreadForMN(BlockedEncodingAttr layout, bool isM) {
   auto order = layout.getOrder();
   auto sizePerThread = getSizePerThread(layout);
+  int rank = sizePerThread.size();
 
   int mSizePerThread =
-      order[0] == 1 ? sizePerThread[order[1]] : sizePerThread[order[0]];
+      order[0] == rank - 1 ? sizePerThread[order[1]] : sizePerThread[order[0]];
   int nSizePerThread =
-      order[0] == 0 ? sizePerThread[order[1]] : sizePerThread[order[0]];
+      order[0] == rank - 2 ? sizePerThread[order[1]] : sizePerThread[order[0]];
+
+  std::cout << "    - getSizePerthreadForMN - order[0]: " << order[0]
+            << ", rank: " << rank << "\n";
+  std::cout << "    - getSizePerThreadForMN - mSizePerThread: "
+            << mSizePerThread << ", nSizePerThread: " << nSizePerThread << "\n";
   return isM ? mSizePerThread : nSizePerThread;
 }
 
@@ -70,8 +84,8 @@ Value getStructFromValueTable(ArrayRef<Value> vals,
   return packLLElements(loc, typeConverter, elems, rewriter, structTy);
 }
 
-ValueTable getValueTableFromStruct(Value val, int K, int n0, int shapePerCTA,
-                                   int sizePerThread,
+ValueTable getValueTableFromStruct(Value val, int batch, int K, int n0,
+                                   int shapePerCTA, int sizePerThread,
                                    ConversionPatternRewriter &rewriter,
                                    Location loc,
                                    const LLVMTypeConverter *typeConverter,
@@ -79,11 +93,13 @@ ValueTable getValueTableFromStruct(Value val, int K, int n0, int shapePerCTA,
   ValueTable res;
   auto elems = unpackLLElements(loc, val, rewriter);
   int index = 0;
-  for (unsigned k = 0; k < K; ++k) {
-    for (unsigned m = 0; m < n0; m += shapePerCTA)
-      for (unsigned mm = 0; mm < sizePerThread; ++mm) {
-        res[{m + mm, k}] = elems[index++];
-      }
+  for (unsigned b = 0; b < batch; ++b) {
+    for (unsigned k = 0; k < K; ++k) {
+      for (unsigned m = 0; m < n0; m += shapePerCTA)
+        for (unsigned mm = 0; mm < sizePerThread; ++mm) {
+          res[{m + mm, k}] = elems[index++];
+        }
+    }
   }
   return res;
 }
@@ -94,22 +110,26 @@ Value loadAFMA(Value A, Value llA, BlockedEncodingAttr dLayout, Value thread,
   auto aTensorTy = cast<MemDescType>(A.getType());
   auto aLayout = cast<SharedEncodingAttr>(aTensorTy.getEncoding());
   auto aShapePerCTA = getShapePerCTA(aTensorTy);
+  unsigned rank = aShapePerCTA.size();
 
   auto aOrder = aLayout.getOrder();
   auto order = dLayout.getOrder();
 
-  bool isARow = aOrder[0] == 1;
+  bool isARow = aOrder[0] == rank - 1;
 
   auto aSmem = getSharedMemoryObjectFromStruct(
       loc, llA, typeConverter->convertType(aTensorTy.getElementType()),
       rewriter);
-  Value strideAM = aSmem.strides[0];
-  Value strideAK = aSmem.strides[1];
+  Value strideAB =
+      rank == 3 ? aSmem.strides[0] : i32_val(0); // stride for batch
+  Value strideAM = aSmem.strides[rank - 2];
+  Value strideAK = aSmem.strides[rank - 1];
   Value strideA0 = isARow ? strideAK : strideAM;
   Value strideA1 = isARow ? strideAM : strideAK;
   int aNumPtr = 8;
-  int K = aShapePerCTA[1];
-  int M = aShapePerCTA[0];
+  int batch = rank == 3 ? aShapePerCTA[0] : 1;
+  int K = aShapePerCTA[rank - 1];
+  int M = aShapePerCTA[rank - 2];
 
   auto shapePerCTATile = getShapePerCTATile(dLayout);
   auto sizePerThread = getSizePerThread(dLayout);
@@ -121,7 +141,8 @@ Value loadAFMA(Value A, Value llA, BlockedEncodingAttr dLayout, Value thread,
   // threadId in blocked layout
   auto threadIds = getThreadIds(thread, shapePerCTATile, sizePerThread, order,
                                 rewriter, loc);
-  Value threadIdM = threadIds[0];
+  // Value threadIdM = threadIds[0];
+  Value threadIdM = threadIds[rank - 2];
 
   Value offA0 = isARow ? _0 : mul(threadIdM, mContig);
   Value offA1 = isARow ? mul(threadIdM, mContig) : _0;
@@ -141,16 +162,19 @@ Value loadAFMA(Value A, Value llA, BlockedEncodingAttr dLayout, Value thread,
   int mShapePerCTATile = getShapePerCTATileForMN(dLayout, true /*isM*/);
   int mSizePerThread = getSizePerThreadForMN(dLayout, true /*isM*/);
 
-  for (unsigned k = 0; k < K; ++k)
-    for (unsigned m = 0; m < M; m += mShapePerCTATile)
-      for (unsigned mm = 0; mm < mSizePerThread; ++mm) {
-        Value offset =
-            add(mul(i32_val(m + mm), strideAM), mul(i32_val(k), strideAK));
-        Value pa = gep(ptrTy, elemTy, aPtrs[0], offset);
-        Value va = load(elemTy, pa);
-        vas.emplace_back(va);
-      }
-
+  for (unsigned b = 0; b < batch; ++b)
+    for (unsigned k = 0; k < K; ++k)
+      for (unsigned m = 0; m < M; m += mShapePerCTATile)
+        for (unsigned mm = 0; mm < mSizePerThread; ++mm) {
+          Value offset =
+              add(mul(i32_val(m + mm), strideAM), mul(i32_val(k), strideAK));
+          if (b > 0)
+            offset = add(offset, mul(i32_val(b), strideAB));
+          Value pa = gep(ptrTy, elemTy, aPtrs[0], offset);
+          Value va = load(elemTy, pa);
+          vas.emplace_back(va);
+        }
+  std::cout << "      - LoadAFMA vas.size(): " << vas.size() << std::endl;
   return getStructFromValueTable(vas, rewriter, loc, typeConverter, elemTy);
 }
 
@@ -160,22 +184,26 @@ Value loadBFMA(Value B, Value llB, BlockedEncodingAttr dLayout, Value thread,
   auto bTensorTy = cast<MemDescType>(B.getType());
   auto bLayout = cast<SharedEncodingAttr>(bTensorTy.getEncoding());
   auto bShapePerCTA = getShapePerCTA(bTensorTy);
+  unsigned rank = bShapePerCTA.size();
 
   auto bOrder = bLayout.getOrder();
   auto order = dLayout.getOrder();
 
-  bool isBRow = bOrder[0] == 1;
+  bool isBRow = bOrder[0] == rank - 1;
 
   auto bSmem = getSharedMemoryObjectFromStruct(
       loc, llB, typeConverter->convertType(bTensorTy.getElementType()),
       rewriter);
-  Value strideBN = bSmem.strides[1];
-  Value strideBK = bSmem.strides[0];
+  Value strideBB =
+      rank == 3 ? bSmem.strides[0] : i32_val(0); // stride for batch
+  Value strideBN = bSmem.strides[rank - 1];
+  Value strideBK = bSmem.strides[rank - 2];
   Value strideB0 = isBRow ? strideBN : strideBK;
   Value strideB1 = isBRow ? strideBK : strideBN;
   int bNumPtr = 8;
-  int K = bShapePerCTA[0];
-  int N = bShapePerCTA[1];
+  int batch = rank == 3 ? bShapePerCTA[0] : 1;
+  int K = bShapePerCTA[rank - 2];
+  int N = bShapePerCTA[rank - 1];
 
   auto shapePerCTATile = getShapePerCTATile(dLayout);
   auto sizePerThread = getSizePerThread(dLayout);
@@ -187,7 +215,8 @@ Value loadBFMA(Value B, Value llB, BlockedEncodingAttr dLayout, Value thread,
   // threadId in blocked layout
   auto threadIds = getThreadIds(thread, shapePerCTATile, sizePerThread, order,
                                 rewriter, loc);
-  Value threadIdN = threadIds[1];
+  // Value threadIdN = threadIds[1];
+  Value threadIdN = threadIds[rank - 1];
 
   Value offB0 = isBRow ? mul(threadIdN, nContig) : _0;
   Value offB1 = isBRow ? _0 : mul(threadIdN, nContig);
@@ -207,16 +236,19 @@ Value loadBFMA(Value B, Value llB, BlockedEncodingAttr dLayout, Value thread,
   int nShapePerCTATile = getShapePerCTATileForMN(dLayout, false /*isM*/);
   int nSizePerThread = getSizePerThreadForMN(dLayout, false /*isM*/);
 
-  for (unsigned k = 0; k < K; ++k)
-    for (unsigned n = 0; n < N; n += nShapePerCTATile)
-      for (unsigned nn = 0; nn < nSizePerThread; ++nn) {
-        Value offset =
-            add(mul(i32_val(n + nn), strideBN), mul(i32_val(k), strideBK));
-        Value pb = gep(ptrTy, elemTy, bPtrs[0], offset);
-        Value vb = load(elemTy, pb);
-        vbs.emplace_back(vb);
-      }
-
+  for (unsigned b = 0; b < batch; ++b)
+    for (unsigned k = 0; k < K; ++k)
+      for (unsigned n = 0; n < N; n += nShapePerCTATile)
+        for (unsigned nn = 0; nn < nSizePerThread; ++nn) {
+          Value offset =
+              add(mul(i32_val(n + nn), strideBN), mul(i32_val(k), strideBK));
+          if (b > 0)
+            offset = add(offset, mul(i32_val(b), strideBB));
+          Value pb = gep(ptrTy, elemTy, bPtrs[0], offset);
+          Value vb = load(elemTy, pb);
+          vbs.emplace_back(vb);
+        }
+  std::cout << "      - LoadBFMA vbs.size(): " << vbs.size() << std::endl;
   return getStructFromValueTable(vbs, rewriter, loc, typeConverter, elemTy);
 }
 
@@ -225,6 +257,8 @@ Value convertLayout(int opIdx, Value val, Value llVal,
                     BlockedEncodingAttr dLayout, Value thread, Location loc,
                     const LLVMTypeConverter *typeConverter,
                     ConversionPatternRewriter &rewriter) {
+  std::cout << "    ~ SharedToDotOperandFMA::convertLayout: OpIdx " << opIdx
+            << std::endl;
   if (opIdx == 0)
     return loadAFMA(val, llVal, dLayout, thread, loc, typeConverter, rewriter);
   else

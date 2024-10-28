@@ -3548,11 +3548,10 @@ def test_dot3d(B, num_warps, M, N, K, BLOCK_M, BLOCK_N, in_dtype_str, out_dtype_
             if out_dtype_str == "float16":
                 pytest.skip(f"{out_dtype_str} has low precision in WMMA dot")
     else:
-        input_precision = "tf32" if is_cuda() and in_dtype_str == 'float32' else "ieee"
+        input_precision = "tf32" if (is_cuda() or is_xpu()) and in_dtype_str == 'float32' else "ieee"
 
     if B == 8 and M == 64 and in_dtype_str == "float32" and out_dtype_str == "float32":
-        if not is_interpreter() and torch.cuda.is_available(
-        ) and triton.runtime.driver.active.utils.get_device_properties(
+        if not is_interpreter() and triton.runtime.driver.active.utils.get_device_properties(
                 torch.cuda.current_device())["max_shared_mem"] < 131072:
             pytest.skip(
                 "Skipping tests with B = 8, M = 64, in_type = float32, out_type = float32 due to insufficient shared memory (less than 128 KB per SM) on this GPU."

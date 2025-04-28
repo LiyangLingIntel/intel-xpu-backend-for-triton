@@ -121,11 +121,11 @@ setup(
         "matplotlib",
     ],
     package_dir={"triton_kernels_benchmark": "triton_kernels_benchmark"},
-    package_data={"triton_kernels_benchmark": ["xetla_kernel.cpython-*.so"]},
+    # package_data={"triton_kernels_benchmark": ["xetla_kernel.cpython-*.so"]},
     cmdclass={
         "build_ext": build_ext,
     },
-    ext_modules=[CMakeExtension("triton_kernels_benchmark.xetla_kernel")],
+    # ext_modules=[CMakeExtension("triton_kernels_benchmark.xetla_kernel")],
     entry_points={
         "console_scripts": [
             "triton-benchmarks = triton_kernels_benchmark.benchmark_utils:main",

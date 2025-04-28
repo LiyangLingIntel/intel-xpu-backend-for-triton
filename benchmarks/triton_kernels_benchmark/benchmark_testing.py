@@ -183,12 +183,13 @@ def do_bench_upstream_pytorch_profiler(fn, n_warmup=25, n_repeat=100, grad_to_no
     return _summarize_statistics(times, quantiles, return_mode)
 
 
-if BENCHMARKING_METHOD == "ELAPSED_TIME":
-    do_bench = do_bench_elapsed_time
-elif BENCHMARKING_METHOD == "UPSTREAM_PYTORCH_PROFILER":
-    do_bench = do_bench_upstream_pytorch_profiler
-else:
-    raise NotImplementedError(f"BENCHMARKING_METHOD: {BENCHMARKING_METHOD} isn't implemented")
+do_bench = do_bench_elapsed_time
+# if BENCHMARKING_METHOD == "ELAPSED_TIME":
+#     do_bench = do_bench_elapsed_time
+# elif BENCHMARKING_METHOD == "UPSTREAM_PYTORCH_PROFILER":
+#     do_bench = do_bench_upstream_pytorch_profiler
+# else:
+#     raise NotImplementedError(f"BENCHMARKING_METHOD: {BENCHMARKING_METHOD} isn't implemented")
 
 
 def assert_close(x_fn, y_fn, atol=None, rtol=None, err_msg=""):

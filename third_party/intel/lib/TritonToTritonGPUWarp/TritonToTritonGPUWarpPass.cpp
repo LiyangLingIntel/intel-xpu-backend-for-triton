@@ -411,6 +411,8 @@ public:
           // Assign:
           // - rank-2 operations: block layout
           // - rank-1 operations: slice layout
+          if (op->getNumResults() != 1)
+            op->dump();
           assert(op->getNumResults() == 1 &&
                  "Unexpected tensor operation with multiple results");
           OpResult res = op->getOpResult(0);
